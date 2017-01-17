@@ -20,7 +20,10 @@
 package org.nuxeo.ecm.core.api.model.impl;
 
 import java.io.Serializable;
+import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Map;
+import java.util.Optional;
 
 import org.nuxeo.common.utils.Path;
 import org.nuxeo.ecm.core.api.PropertyException;
@@ -51,6 +54,22 @@ public abstract class AbstractProperty implements Property {
     public boolean forceDirty = false;
 
     protected int flags;
+
+    protected static final Map<String, Map<String, String>> DEPRECATED_PROPERTIES = new HashMap<>();
+
+    static {
+        DEPRECATED_PROPERTIES.computeIfAbsent("deprecated", key -> new HashMap<>()).put("scalar", null);
+        DEPRECATED_PROPERTIES.computeIfAbsent("deprecated", key -> new HashMap<>()).put("complex", null);
+        DEPRECATED_PROPERTIES.computeIfAbsent("deprecated", key -> new HashMap<>()).put("scalar2scalar", "scalarfallback");
+        DEPRECATED_PROPERTIES.computeIfAbsent("deprecated", key -> new HashMap<>()).put("scalar2complex", "complexfallback/scalar");
+        DEPRECATED_PROPERTIES.computeIfAbsent("deprecated", key -> new HashMap<>()).put("complex2complex", "complexfallback");
+        DEPRECATED_PROPERTIES.computeIfAbsent("removed", key -> new HashMap<>()).put("scalar", null);
+        DEPRECATED_PROPERTIES.computeIfAbsent("removed", key -> new HashMap<>()).put("complex", null);
+        DEPRECATED_PROPERTIES.computeIfAbsent("removed", key -> new HashMap<>()).put("scalar2scalar", "scalarfallback");
+        DEPRECATED_PROPERTIES.computeIfAbsent("removed", key -> new HashMap<>()).put("scalar2complex", "complexfallback/scalar");
+        DEPRECATED_PROPERTIES.computeIfAbsent("removed", key -> new HashMap<>()).put("complex2complex", "complexfallback");
+        DEPRECATED_PROPERTIES.computeIfAbsent("file", key -> new HashMap<>()).put("filename", "content/name");
+    }
 
     protected AbstractProperty(Property parent) {
         this.parent = parent;
@@ -413,19 +432,61 @@ public abstract class AbstractProperty implements Property {
                     throw new PropertyNotFoundException(path.toString(), "Parse error: no matching '[' was found");
                 }
                 index = segment.substring(p + 1, segment.length() - 1);
-                segment = segment.substring(0, p);
+                // TODO is it needed ?
+//                segment = segment.substring(0, p);
             }
             if (index == null) {
+                Property parent = property;
                 property = property.get(segment);
+//                property = wrapDeprecatedPropertyIfNeeded(property.get(segment));
                 if (property == null) {
-                    throw new PropertyNotFoundException(path.toString(), "segment " + segments[i]
-                            + " cannot be resolved");
+                    // TODO need to handle deprecated property, here we just handle removed one
+                    // TODO change that, we need it in order to properly inject the parent of deprecated property to build
+                    property = ((AbstractProperty) parent).computeRemovedProperty(segment).orElseThrow(
+                            () -> new PropertyNotFoundException(path.toString(),
+                                    "segment " + segment + " cannot be resolved"));
+                    throw new PropertyNotFoundException(path.toString(), "segment " + segment + " cannot be resolved");
                 }
             } else {
                 property = property.get(index);
             }
         }
         return property;
+    }
+
+    protected Property wrapDeprecatedPropertyIfNeeded(Property property) {
+        if (property == null || property instanceof DeprecatedProperty) {
+            return property;
+        }
+        Property result = property;
+        String name = result.getName();
+        Map<String, String> deprecatedPropertiesForSchema = DEPRECATED_PROPERTIES.get(
+                getSchema().getName());
+        if (deprecatedPropertiesForSchema != null && deprecatedPropertiesForSchema.containsKey(name)) {
+            String fallback = deprecatedPropertiesForSchema.get(name);
+            if (fallback == null) {
+                result = new DeprecatedProperty(property);
+            } else {
+                result = new DeprecatedProperty(property, resolvePath('/' + fallback));
+            }
+        }
+        return result;
+    }
+
+    protected Optional<Property> computeRemovedProperty(String name) {
+        Map<String, String> deprecatedPropertiesForSchema = DEPRECATED_PROPERTIES.get(
+                getSchema().getName());
+        if (deprecatedPropertiesForSchema != null && deprecatedPropertiesForSchema.containsKey(name)) {
+            String fallback = deprecatedPropertiesForSchema.get(name);
+            Property property;
+            if (fallback == null) {
+                property = new RemovedProperty(this, name);
+            } else {
+                property = new RemovedProperty(this, name, resolvePath('/' + fallback));
+            }
+            return Optional.of(property);
+        }
+        return Optional.empty();
     }
 
     @Override

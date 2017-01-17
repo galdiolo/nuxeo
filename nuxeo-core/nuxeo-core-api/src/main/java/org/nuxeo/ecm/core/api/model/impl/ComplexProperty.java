@@ -106,6 +106,7 @@ public abstract class ComplexProperty extends AbstractProperty implements Map<St
             if (property == null) {
                 return null;
             }
+            property = wrapDeprecatedPropertyIfNeeded(property);
             children.put(name, property);
         }
         return property;
@@ -115,6 +116,7 @@ public abstract class ComplexProperty extends AbstractProperty implements Map<St
         Property property = getNonPhantomChild(field);
         if (property == null) {
             property = getRoot().createProperty(this, field, IS_PHANTOM);
+            property = wrapDeprecatedPropertyIfNeeded(property);
             children.put(property.getName(), property); // cache it
         }
         return property;
@@ -149,7 +151,7 @@ public abstract class ComplexProperty extends AbstractProperty implements Map<St
     public Property get(String name) throws PropertyNotFoundException {
         Field field = getType().getField(name);
         if (field == null) {
-            return null;
+            return computeRemovedProperty(name).orElse(null);
         }
         return getChild(field);
     }
